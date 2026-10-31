@@ -9,6 +9,7 @@ type SettingsForm = {
   company_name: string;
   professional_name: string;
   job_title: string;
+  monthly_goal: string;
   base_salary: string;
   transport_allowance: string;
   other_benefits: string;
@@ -20,6 +21,7 @@ const initialForm: SettingsForm = {
   company_name: "",
   professional_name: "",
   job_title: "",
+  monthly_goal: "0",
   base_salary: "0",
   transport_allowance: "0",
   other_benefits: "0",
@@ -71,10 +73,26 @@ function money(value: number, currency = "BRL"): string {
   }
 }
 
+function currencySymbol(currency: string): string {
+  try {
+    return (
+      new Intl.NumberFormat("pt-BR", {
+        style: "currency",
+        currency,
+      })
+        .formatToParts(0)
+        .find((part) => part.type === "currency")?.value ?? currency
+    );
+  } catch {
+    return "R$";
+  }
+}
+
 type MoneyInputProps = {
   label: string;
   value: string;
   onChange: (value: string) => void;
+  currency?: string;
   required?: boolean;
 };
 
@@ -82,6 +100,7 @@ function MoneyInput({
   label,
   value,
   onChange,
+  currency = "BRL",
   required = false,
 }: MoneyInputProps) {
   const [editing, setEditing] = useState(false);
@@ -120,7 +139,7 @@ function MoneyInput({
       <span>{label}</span>
 
       <div className="settings-money-input">
-        <span>R$</span>
+        <span>{currencySymbol(currency)}</span>
 
         <input
           type="text"
@@ -188,6 +207,7 @@ export default function ConfiguracoesPage() {
             company_name: data.company_name ?? "",
             professional_name: data.professional_name ?? "",
             job_title: data.job_title ?? "",
+            monthly_goal: String(data.monthly_goal ?? 0),
             base_salary: String(data.base_salary ?? 0),
             transport_allowance: String(data.transport_allowance ?? 0),
             other_benefits: String(data.other_benefits ?? 0),
@@ -237,6 +257,7 @@ export default function ConfiguracoesPage() {
     }
 
     const monetaryFields = [
+      { label: "Meta mensal de vendas", value: form.monthly_goal },
       { label: "Salário-base", value: form.base_salary },
       { label: "Auxílio-transporte", value: form.transport_allowance },
       { label: "Outros benefícios", value: form.other_benefits },
@@ -263,6 +284,7 @@ export default function ConfiguracoesPage() {
       company_name: form.company_name.trim() || null,
       professional_name: form.professional_name.trim() || null,
       job_title: form.job_title.trim(),
+      monthly_goal: numericValue(form.monthly_goal),
       base_salary: numericValue(form.base_salary),
       transport_allowance: numericValue(form.transport_allowance),
       other_benefits: numericValue(form.other_benefits),
@@ -288,6 +310,7 @@ export default function ConfiguracoesPage() {
     }
   }
 
+  const monthlyGoal = numericValue(form.monthly_goal);
   const salary = numericValue(form.base_salary);
   const transport = numericValue(form.transport_allowance);
   const benefits = numericValue(form.other_benefits);
@@ -337,6 +360,11 @@ export default function ConfiguracoesPage() {
           <article className="settings-summary-item">
             <span>Salário-base</span>
             <strong>{money(salary, form.currency_code)}</strong>
+          </article>
+
+          <article className="settings-summary-item">
+            <span>Meta mensal de vendas</span>
+            <strong>{money(monthlyGoal, form.currency_code)}</strong>
           </article>
 
           <article className="settings-summary-item">
@@ -431,6 +459,35 @@ export default function ConfiguracoesPage() {
         <section className="settings-card">
           <div className="settings-card-heading">
             <div>
+              <h2>Meta mensal de vendas</h2>
+              <p>
+                Defina quanto deseja vender no mês e acompanhe seu progresso
+                no painel.
+              </p>
+            </div>
+          </div>
+
+          <div className="settings-fields-grid">
+            <MoneyInput
+              label="Meta mensal de faturamento"
+              value={form.monthly_goal}
+              currency={form.currency_code}
+              onChange={(value) =>
+                updateField("monthly_goal", value)
+              }
+            />
+          </div>
+
+          <p className="settings-help">
+            Essa meta representa o valor total de vendas que você pretende
+            alcançar no mês. Ela será utilizada no indicador de progresso
+            do painel.
+          </p>
+        </section>
+
+        <section className="settings-card">
+          <div className="settings-card-heading">
+            <div>
               <h2>Remuneração e benefícios</h2>
               <p>Configure valores mensais para suas estimativas.</p>
             </div>
@@ -440,6 +497,7 @@ export default function ConfiguracoesPage() {
             <MoneyInput
               label="Salário-base mensal"
               value={form.base_salary}
+              currency={form.currency_code}
               onChange={(value) =>
                 updateField("base_salary", value)
               }
@@ -448,6 +506,7 @@ export default function ConfiguracoesPage() {
             <MoneyInput
               label="Auxílio-transporte mensal"
               value={form.transport_allowance}
+              currency={form.currency_code}
               onChange={(value) =>
                 updateField("transport_allowance", value)
               }
@@ -456,6 +515,7 @@ export default function ConfiguracoesPage() {
             <MoneyInput
               label="Outros benefícios mensais"
               value={form.other_benefits}
+              currency={form.currency_code}
               onChange={(value) =>
                 updateField("other_benefits", value)
               }
@@ -464,6 +524,7 @@ export default function ConfiguracoesPage() {
             <MoneyInput
               label="Descontos fixos mensais"
               value={form.fixed_deductions}
+              currency={form.currency_code}
               onChange={(value) =>
                 updateField("fixed_deductions", value)
               }

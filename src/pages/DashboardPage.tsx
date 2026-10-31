@@ -8,6 +8,7 @@ import {
   calculateEstimatedCommission,
   type CommissionRange,
 } from "../lib/commission";
+import { todayInBrazil } from "../domain/dates";
 import "../styles/dashboard.css";
 
 type SalesEntry = {
@@ -28,14 +29,6 @@ type DailySales = {
   date: string;
   total: number;
 };
-
-function getLocalDateString(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
-}
 
 function formatCurrency(value: number, currency = "BRL"): string {
   return new Intl.NumberFormat("pt-BR", {
@@ -97,7 +90,7 @@ export function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [todayString, setTodayString] = useState(() =>
-    getLocalDateString(new Date()),
+    todayInBrazil(),
   );
 
   const loadSales = useCallback(async () => {
@@ -114,13 +107,10 @@ export function DashboardPage() {
     setError("");
 
     try {
-      const now = new Date();
+      const brazilToday = todayInBrazil();
 
-      const startDate = getLocalDateString(
-        new Date(now.getFullYear(), now.getMonth(), 1),
-      );
-
-      const endDate = getLocalDateString(now);
+      const startDate = `${brazilToday.slice(0, 7)}-01`;
+      const endDate = brazilToday;
 
       const [
         { data: salesData, error: salesError },
@@ -193,43 +183,29 @@ export function DashboardPage() {
     void loadSales();
   }, [loadSales]);
 
+  // Atualiza o painel quando o dia muda no fuso horário brasileiro.
   useEffect(() => {
-    let timeoutId: number | undefined;
+    let lastBrazilDate = todayInBrazil();
 
-    function scheduleNextMidnight() {
-      const now = new Date();
+    const intervalId = window.setInterval(() => {
+      const currentBrazilDate = todayInBrazil();
 
-      const nextMidnight = new Date(
-        now.getFullYear(),
-        now.getMonth(),
-        now.getDate() + 1,
-        0,
-        0,
-        0,
-        50,
-      );
+      if (currentBrazilDate === lastBrazilDate) return;
 
-      timeoutId = window.setTimeout(() => {
-        setTodayString(getLocalDateString(new Date()));
-        void loadSales();
-        scheduleNextMidnight();
-      }, Math.max(0, nextMidnight.getTime() - now.getTime()));
-    }
+      lastBrazilDate = currentBrazilDate;
+      setTodayString(currentBrazilDate);
+      void loadSales();
+    }, 60_000);
 
-    scheduleNextMidnight();
-
-    return () => {
-      if (timeoutId !== undefined) {
-        window.clearTimeout(timeoutId);
-      }
-    };
+    return () => window.clearInterval(intervalId);
   }, [loadSales]);
 
+  // Atualiza os dados quando o usuário retorna à aba do aplicativo.
   useEffect(() => {
     function handleVisibilityChange() {
       if (document.visibilityState !== "visible") return;
 
-      setTodayString(getLocalDateString(new Date()));
+      setTodayString(todayInBrazil());
       void loadSales();
     }
 
