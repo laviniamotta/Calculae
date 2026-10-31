@@ -1,4 +1,3 @@
-
 import {
   calculateCommission,
   CommissionError,
@@ -67,8 +66,16 @@ function toBasisPoints(rate: number): number {
 }
 
 /**
- * Converte as faixas da tela/banco para a representação do domínio
- * e reutiliza a validação oficial de continuidade.
+ * Valida uma configuração completa de faixas.
+ *
+ * Exige:
+ * - início em R$ 0,00;
+ * - continuidade entre todas as faixas;
+ * - ausência de sobreposições;
+ * - última faixa sem limite máximo.
+ *
+ * Utilizada para garantir que o cálculo de comissão
+ * tenha uma regra válida para qualquer faturamento.
  */
 export function validateCommissionRanges(
   ranges: CommissionRange[],
@@ -100,6 +107,65 @@ export function validateCommissionRanges(
 
   const issues = validateDomainRanges(tiers, {
     contiguous: true,
+    format: formatBRL,
+  });
+
+  return issues[0]?.message ?? null;
+}
+
+/**
+ * Valida as faixas durante o cadastro progressivo.
+ *
+ * Permite lacunas temporárias e uma última faixa limitada,
+ * pois o usuário pode ainda estar configurando as demais faixas.
+ *
+ * Continua exigindo:
+ * - valores monetários válidos;
+ * - taxas válidas;
+ * - primeira faixa começando em zero;
+ * - ausência de sobreposições;
+ * - nenhuma faixa ilimitada antes de outra.
+ *
+ * A validação completa continua obrigatória para o cálculo.
+ */
+export function validateCommissionRangeDrafts(
+  ranges: CommissionRange[],
+): string | null {
+  if (ranges.length === 0) return null;
+
+  const tiers: { min: Cents; max: Cents | null }[] = [];
+
+  for (const [index, range] of ranges.entries()) {
+    try {
+      const min = toCents(range.min_sales, "Limite mínimo");
+      const max =
+        range.max_sales === null
+          ? null
+          : toCents(range.max_sales, "Limite máximo");
+
+      toBasisPoints(range.commission_rate);
+
+      tiers.push({ min, max });
+    } catch (error) {
+      const reason =
+        error instanceof Error
+          ? error.message
+          : "valor inválido.";
+
+      return `Faixa ${index + 1}: ${reason}`;
+    }
+  }
+
+  const ordered = [...tiers].sort(
+    (a, b) => a.min - b.min,
+  );
+
+  if (ordered[0]?.min !== 0) {
+    return `A primeira faixa deve começar em ${formatBRL(0)}, mas começa em ${formatBRL(ordered[0]?.min ?? 0)}.`;
+  }
+
+  const issues = validateDomainRanges(tiers, {
+    contiguous: false,
     format: formatBRL,
   });
 

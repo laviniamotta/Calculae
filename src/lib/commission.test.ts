@@ -1,4 +1,3 @@
-
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
@@ -7,6 +6,7 @@ import {
   getCommissionEstimate,
   getCommissionRange,
   validateCommissionRanges,
+  validateCommissionRangeDrafts,
   type CommissionRange,
 } from "./commission.ts";
 
@@ -58,7 +58,7 @@ test("sem faixas cadastradas não existe comissão aplicável", () => {
   assert.equal(getCommissionRange(1000, []), null);
 });
 
-test("rejeita faixas com lacunas", () => {
+test("rejeita faixas com lacunas no cálculo", () => {
   const invalidRanges: CommissionRange[] = [
     {
       id: 1,
@@ -86,7 +86,7 @@ test("aceita faixas contínuas com a última faixa ilimitada", () => {
   assert.equal(validateCommissionRanges(ranges), null);
 });
 
-test("rejeita uma última faixa com limite máximo", () => {
+test("rejeita uma última faixa limitada na validação completa", () => {
   const invalidRanges: CommissionRange[] = [
     {
       id: 1,
@@ -170,4 +170,135 @@ test("calcula normalmente quando a configuração é válida", () => {
     assert.equal(result.range?.id, 2);
     assert.equal(result.amount, 20);
   }
+});
+
+// ============================================================================
+// TESTES DA VALIDAÇÃO PROGRESSIVA
+// ============================================================================
+
+test("cadastro progressivo aceita a primeira faixa limitada", () => {
+  const draft: CommissionRange[] = [
+    {
+      id: 1,
+      min_sales: 0,
+      max_sales: 5000,
+      commission_rate: 1,
+    },
+  ];
+
+  assert.equal(validateCommissionRangeDrafts(draft), null);
+});
+
+test("cadastro progressivo aceita duas faixas contínuas e limitadas", () => {
+  const draft: CommissionRange[] = [
+    {
+      id: 1,
+      min_sales: 0,
+      max_sales: 5000,
+      commission_rate: 1,
+    },
+    {
+      id: 2,
+      min_sales: 5000.01,
+      max_sales: 10000,
+      commission_rate: 2,
+    },
+  ];
+
+  assert.equal(validateCommissionRangeDrafts(draft), null);
+});
+
+test("cadastro progressivo aceita lacunas temporárias", () => {
+  const draft: CommissionRange[] = [
+    {
+      id: 1,
+      min_sales: 0,
+      max_sales: 5000,
+      commission_rate: 1,
+    },
+    {
+      id: 2,
+      min_sales: 6000,
+      max_sales: 10000,
+      commission_rate: 2,
+    },
+  ];
+
+  assert.equal(validateCommissionRangeDrafts(draft), null);
+});
+
+test("cadastro progressivo rejeita faixas sobrepostas", () => {
+  const draft: CommissionRange[] = [
+    {
+      id: 1,
+      min_sales: 0,
+      max_sales: 5000,
+      commission_rate: 1,
+    },
+    {
+      id: 2,
+      min_sales: 4999,
+      max_sales: 10000,
+      commission_rate: 2,
+    },
+  ];
+
+  assert.match(
+    validateCommissionRangeDrafts(draft) ?? "",
+    /sobrepõe/,
+  );
+});
+
+test("cadastro progressivo exige que a primeira faixa comece em zero", () => {
+  const draft: CommissionRange[] = [
+    {
+      id: 1,
+      min_sales: 5000,
+      max_sales: 10000,
+      commission_rate: 1,
+    },
+  ];
+
+  assert.match(
+    validateCommissionRangeDrafts(draft) ?? "",
+    /deve começar/,
+  );
+});
+
+test("cadastro progressivo rejeita faixa ilimitada antes de outra", () => {
+  const draft: CommissionRange[] = [
+    {
+      id: 1,
+      min_sales: 0,
+      max_sales: null,
+      commission_rate: 1,
+    },
+    {
+      id: 2,
+      min_sales: 5000,
+      max_sales: 10000,
+      commission_rate: 2,
+    },
+  ];
+
+  assert.match(
+    validateCommissionRangeDrafts(draft) ?? "",
+    /não tem limite máximo/,
+  );
+});
+
+test("cadastro progressivo também rejeita taxas inválidas", () => {
+  const draft: CommissionRange[] = [
+    {
+      id: 1,
+      min_sales: 0,
+      max_sales: 5000,
+      commission_rate: 1.555,
+    },
+  ];
+
+  assert.match(
+    validateCommissionRangeDrafts(draft) ?? "",
+    /duas casas decimais/,
+  );
 });

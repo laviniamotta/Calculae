@@ -1,4 +1,3 @@
-
 import {
   useCallback,
   useEffect,
@@ -10,7 +9,7 @@ import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/auth";
 import {
   getCommissionEstimate,
-  validateCommissionRanges,
+  validateCommissionRangeDrafts,
   type CommissionRange,
 } from "../lib/commission";
 import { todayInBrazil } from "../domain/dates";
@@ -245,6 +244,12 @@ export function ComissoesPage() {
     setMessage("");
   }
 
+  /**
+   * Salva uma faixa de cada vez.
+   *
+   * A validação progressiva permite configurar as faixas
+   * sem exigir que todas estejam prontas no primeiro cadastro.
+   */
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -256,8 +261,9 @@ export function ComissoesPage() {
     if (saving) return;
 
     const min = parseMoney(form.min_sales);
+    const hasMax = form.max_sales.trim().length > 0;
 
-    const max = form.max_sales.trim()
+    const max = hasMax
       ? parseMoney(form.max_sales)
       : null;
 
@@ -267,7 +273,7 @@ export function ComissoesPage() {
 
     const rate = Number(rateValue);
 
-    if (min === null || (form.max_sales.trim() && max === null)) {
+    if (min === null || (hasMax && max === null)) {
       setError("Informe valores monetários válidos.");
       return;
     }
@@ -296,10 +302,10 @@ export function ComissoesPage() {
             range.id === editingId ? candidate : range,
           );
 
-    // A validação é centralizada no domínio, usando centavos
-    // e exigindo faixas contínuas com a última ilimitada.
+    // Permite faixas ainda incompletas durante a configuração,
+    // mas impede valores inválidos e sobreposições.
     const validationError =
-      validateCommissionRanges(nextRanges);
+      validateCommissionRangeDrafts(nextRanges);
 
     if (validationError) {
       setError(validationError);
@@ -407,8 +413,7 @@ export function ComissoesPage() {
     (a, b) => a.min_sales - b.min_sales,
   );
 
-  // O cálculo seguro impede que regras inválidas vindas do banco
-  // provoquem exceções durante a renderização.
+  // O cálculo continua exigindo uma configuração completa e contínua.
   const commissionEstimate = getCommissionEstimate(
     monthlySales,
     ranges,
@@ -484,7 +489,7 @@ export function ComissoesPage() {
                 {loading
                   ? "Carregando..."
                   : !commissionEstimate.ok
-                    ? "Configuração inválida"
+                    ? "Configuração incompleta"
                     : activeRange
                       ? formatCommissionRate(
                           activeRange.commission_rate,
@@ -513,12 +518,16 @@ export function ComissoesPage() {
         {!loading && !commissionEstimate.ok && (
           <div
             className="commission-feedback commission-error"
-            role="alert"
+            role="status"
           >
-            <strong>Não foi possível calcular a comissão.</strong>
+            <strong>
+              Sua configuração de comissão ainda não está completa.
+            </strong>
             <p>
-              {commissionEstimate.error} Revise as faixas cadastradas
-              antes de utilizar a estimativa.
+              {commissionEstimate.error} Você pode continuar cadastrando
+              as faixas. A estimativa será liberada quando a cobertura
+              estiver contínua e a última faixa estiver configurada
+              como "em diante".
             </p>
           </div>
         )}
