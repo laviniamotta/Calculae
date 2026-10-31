@@ -1,0 +1,28 @@
+# Dependências e build
+node_modules/
+dist/
+
+# Variáveis de ambiente
+.env
+.env.*
+!.env.example
+*.local
+
+# Sistema operacional
+.DS_Store
+
+# Supabase local e Vercel
+.supabase/
+.vercel/
+
+# Logs e cobertura de testes
+*.log
+coverage/
+
+# SQL planejado, incompatível com o banco atual
+/supabase/migrations/
+/supabase/tests/
+/supabase/bootstrap_admin.sql
+
+# Documentação antiga, pendente de atualização
+/docs/
