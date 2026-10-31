@@ -2109,3 +2109,26 @@ select {
     width: min(218px, calc(100vw - 24px));
   }
 }
+
+/* =========================================
+   AJUSTE DA MARCA EM TELAS PEQUENAS
+   ========================================= */
+
+@media (max-width: 600px) {
+  .landing-brand-name {
+    max-width: 100%;
+    font-size: clamp(2.35rem, 11.5vw, 3.8rem);
+    letter-spacing: -0.035em;
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 420px) {
+  .header > .logo {
+    flex: 0 1 auto;
+    min-width: 0;
+    font-size: clamp(1.05rem, 4.6vw, 1.25rem);
+    letter-spacing: 0;
+    white-space: nowrap;
+  }
+}

@@ -459,3 +459,26 @@
     transform: none;
   }
 }
+/* =========================================
+   LOGO RESPONSIVA — CELULARES
+   ========================================= */
+
+@media (max-width: 760px) {
+  .login-mobile-brand {
+    max-width: 100%;
+    font-size: clamp(2.5rem, 12vw, 4rem);
+    letter-spacing: -0.055em;
+    line-height: 1.05;
+    white-space: nowrap;
+  }
+
+  .login-card {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 380px) {
+  .login-mobile-brand {
+    font-size: clamp(2.25rem, 11.5vw, 2.7rem);
+  }
+}
