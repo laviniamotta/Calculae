@@ -6,9 +6,7 @@
 
 Aplicação web (PWA) para vendedores acompanharem vendas, comissões e remuneração em um só lugar.
 
-[**Acessar o aplicativo**](https://SEU-APP.vercel.app) · [LinkedIn](https://www.linkedin.com/in/laviniamota/) · [GitHub](https://github.com/laviniamotta)
-
-<!-- PREENCHER: substitua o endereço acima pelo endereço real da Vercel após a publicação. -->
+[**Acessar o aplicativo**](https://calculae-phi.vercel.app/) · [LinkedIn](https://www.linkedin.com/in/laviniamota/) · [GitHub](https://github.com/laviniamotta)
 
 </div>
 
@@ -16,13 +14,15 @@ Aplicação web (PWA) para vendedores acompanharem vendas, comissões e remunera
 
 ## Visão geral
 
-<!-- ADICIONAR: 2 ou 3 imagens (painel, comissões e versão no celular), utilizando uma conta fictícia.
-     Exemplo: ![Painel](assets/painel.png)
-     As imagens podem ser salvas na pasta /assets/, evitando a pasta /docs/, que está no .gitignore. -->
-
 Quem vive de comissão costuma descobrir quanto vai receber só no fim do mês, depois de refazer contas à mão. O CalculaÊ! resolve isso: o vendedor registra as vendas ao longo do dia, define suas faixas de comissão e acompanha, em tempo real, em que faixa está, quanto falta para a próxima e qual é a estimativa de ganho.
 
 O projeto foi construído como parte da minha formação em Engenharia de Software, com atenção especial a um ponto em que aplicações financeiras costumam falhar: **a precisão dos cálculos**.
+
+![Dashboard do CalculaÊ!](assets/dashboard.png)
+
+![Tela de comissões do CalculaÊ!](assets/comissoes.png)
+
+![Tela de login do CalculaÊ!](assets/login.png)
 
 ## Funcionalidades
 
@@ -71,7 +71,7 @@ Além disso, o domínio permite **versões de regra com vigência**: uma regra n
 | Autenticação e dados | Supabase (Auth + PostgreSQL) |
 | PWA | vite-plugin-pwa |
 | Testes | Test runner nativo do Node, executado com `tsx` |
-| Hospedagem planejada | Vercel |
+| Hospedagem | Vercel |
 
 ## Arquitetura
 
@@ -104,7 +104,7 @@ O projeto utiliza políticas RLS para restringir o acesso aos dados de cada usu�
 ### Requisitos
 
 - Node.js 20 ou superior e npm.
-- Um projeto no [Supabase](https://supabase.com).
+- Um projeto no [Supabase](https://supabase.com/).
 
 ### Passo a passo
 
@@ -166,19 +166,19 @@ Os testes cobrem as regras de negócio, que são a parte mais sensível do proje
 
 ## Publicação na Vercel
 
-O projeto ainda está em preparação para publicação.
+O CalculaÊ! está publicado na [Vercel](https://vercel.com/).
 
-Após a implantação:
+A aplicação está disponível em: [https://calculae-phi.vercel.app/](https://calculae-phi.vercel.app/).
 
-1. Importe o repositório na [Vercel](https://vercel.com).
+Para configurar novos ambientes ou ajustar a integração com o Supabase:
+
+1. Importe o repositório na [Vercel](https://vercel.com/).
 2. Configure as variáveis `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` em **Settings → Environment Variables**.
 3. No Supabase, em **Authentication → URL Configuration**, informe o endereço da Vercel em *Site URL* e em *Redirect URLs*. Sem isso, os links de confirmação de e-mail e recuperação de senha podem apontar para o endereço errado.
 
 ## Demonstração
 
-A demonstração pública será disponibilizada após a publicação e validação do aplicativo.
-
-<!-- PREENCHER: escolher uma conta de teste com dados fictícios ou disponibilizar o cadastro aberto. Não publicar credenciais reais. -->
+Acesse a aplicação: [CalculaÊ! — Comissão sem complicação](https://calculae-phi.vercel.app/).
 
 ## Próximos passos
 
