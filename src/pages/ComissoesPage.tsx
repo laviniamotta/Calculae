@@ -1,13 +1,19 @@
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useState,
+  type FormEvent,
+} from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/auth";
 import {
-  getCommissionRange,
-  calculateEstimatedCommission,
+  getCommissionEstimate,
+  validateCommissionRanges,
   type CommissionRange,
 } from "../lib/commission";
+import { todayInBrazil } from "../domain/dates";
 import "../styles/comissoes.css";
 
 type RangeForm = {
@@ -57,66 +63,31 @@ function parseMoney(value: string): number | null {
 }
 
 function formatMoney(value: number): string {
+  const safeValue =
+    Number.isFinite(value) && value >= 0 ? value : 0;
+
   return new Intl.NumberFormat("pt-BR", {
     style: "currency",
     currency: "BRL",
-  }).format(Number.isFinite(value) ? value : 0);
+  }).format(safeValue);
 }
 
-/**
- * Valida a continuidade das faixas cadastradas.
- * A última faixa pode ficar sem limite máximo.
- */
-function validateRanges(ranges: CommissionRange[]): string {
-  if (ranges.length === 0) return "";
-
-  const sorted = [...ranges].sort(
-    (a, b) => a.min_sales - b.min_sales,
-  );
-
-  const first = sorted[0];
-
-  if (!first) return "";
-
-  if (first.min_sales !== 0) {
-    return "A primeira faixa precisa começar em R$ 0,00.";
+function formatRangeBound(value: number): string {
+  if (!Number.isFinite(value) || value < 0) {
+    return "Valor inválido";
   }
 
-  for (let i = 0; i < sorted.length; i++) {
-    const current = sorted[i];
+  return formatMoney(value);
+}
 
-    if (!current) continue;
-
-    if (
-      current.max_sales !== null &&
-      current.max_sales < current.min_sales
-    ) {
-      return `A faixa ${i + 1} possui um limite máximo menor que o mínimo.`;
-    }
-
-    if (i < sorted.length - 1) {
-      const next = sorted[i + 1];
-
-      if (!next) continue;
-
-      if (current.max_sales === null) {
-        return "Somente a última faixa pode ficar sem limite máximo.";
-      }
-
-      const currentMaxCents = Math.round(current.max_sales * 100);
-      const nextMinCents = Math.round(next.min_sales * 100);
-
-      if (nextMinCents <= currentMaxCents) {
-        return `As faixas ${i + 1} e ${i + 2} estão sobrepostas.`;
-      }
-
-      if (nextMinCents !== currentMaxCents + 1) {
-        return `Existe uma lacuna entre as faixas ${i + 1} e ${i + 2}.`;
-      }
-    }
+function formatCommissionRate(value: number): string {
+  if (!Number.isFinite(value) || value < 0 || value > 100) {
+    return "Taxa inválida";
   }
 
-  return "";
+  return `${value.toLocaleString("pt-BR", {
+    maximumFractionDigits: 2,
+  })}%`;
 }
 
 export function ComissoesPage() {
@@ -136,10 +107,13 @@ export function ComissoesPage() {
   const [message, setMessage] = useState("");
 
   /**
-   * Carrega as faixas de comissão e as vendas do mês atual.
+   * Carrega as faixas de comissão e as vendas do mês atual,
+   * utilizando o calendário de America/Sao_Paulo.
    */
   const loadRanges = useCallback(async () => {
     if (!supabase || !userId) {
+      setRanges([]);
+      setMonthlySales(0);
       setError("Não foi possível identificar sua sessão.");
       setLoading(false);
       return;
@@ -149,19 +123,10 @@ export function ComissoesPage() {
     setError("");
 
     try {
-      const now = new Date();
+      const brazilToday = todayInBrazil();
 
-      const startDate = [
-        now.getFullYear(),
-        String(now.getMonth() + 1).padStart(2, "0"),
-        "01",
-      ].join("-");
-
-      const endDate = [
-        now.getFullYear(),
-        String(now.getMonth() + 1).padStart(2, "0"),
-        String(now.getDate()).padStart(2, "0"),
-      ].join("-");
+      const startDate = `${brazilToday.slice(0, 7)}-01`;
+      const endDate = brazilToday;
 
       const [
         { data: rangesData, error: rangesError },
@@ -184,15 +149,17 @@ export function ComissoesPage() {
       if (rangesError) throw rangesError;
       if (salesError) throw salesError;
 
-      const normalizedRanges: CommissionRange[] = (rangesData ?? []).map(
-        (item) => ({
-          id: Number(item.id),
-          min_sales: Number(item.min_sales),
-          max_sales:
-            item.max_sales === null ? null : Number(item.max_sales),
-          commission_rate: Number(item.commission_rate),
-        }),
-      );
+      const normalizedRanges: CommissionRange[] = (
+        rangesData ?? []
+      ).map((item) => ({
+        id: Number(item.id),
+        min_sales: Number(item.min_sales),
+        max_sales:
+          item.max_sales === null
+            ? null
+            : Number(item.max_sales),
+        commission_rate: Number(item.commission_rate),
+      }));
 
       const salesTotal = (salesData ?? []).reduce(
         (total, item) => total + (Number(item.amount) || 0),
@@ -218,6 +185,44 @@ export function ComissoesPage() {
     void loadRanges();
   }, [loadRanges]);
 
+  /**
+   * Recarrega os dados quando o dia muda no calendário brasileiro
+   * ou quando o usuário retorna à página.
+   */
+  useEffect(() => {
+    let lastBrazilDate = todayInBrazil();
+
+    const intervalId = window.setInterval(() => {
+      const currentBrazilDate = todayInBrazil();
+
+      if (currentBrazilDate === lastBrazilDate) return;
+
+      lastBrazilDate = currentBrazilDate;
+      void loadRanges();
+    }, 60_000);
+
+    function handleVisibilityChange() {
+      if (document.visibilityState !== "visible") return;
+
+      lastBrazilDate = todayInBrazil();
+      void loadRanges();
+    }
+
+    document.addEventListener(
+      "visibilitychange",
+      handleVisibilityChange,
+    );
+
+    return () => {
+      window.clearInterval(intervalId);
+
+      document.removeEventListener(
+        "visibilitychange",
+        handleVisibilityChange,
+      );
+    };
+  }, [loadRanges]);
+
   function resetForm() {
     setForm(emptyForm);
     setEditingId(null);
@@ -228,11 +233,11 @@ export function ComissoesPage() {
     setEditingId(range.id);
 
     setForm({
-      min_sales: formatMoney(range.min_sales),
+      min_sales: formatRangeBound(range.min_sales),
       max_sales:
         range.max_sales === null
           ? ""
-          : formatMoney(range.max_sales),
+          : formatRangeBound(range.max_sales),
       commission_rate: String(range.commission_rate),
     });
 
@@ -248,13 +253,18 @@ export function ComissoesPage() {
       return;
     }
 
+    if (saving) return;
+
     const min = parseMoney(form.min_sales);
 
     const max = form.max_sales.trim()
       ? parseMoney(form.max_sales)
       : null;
 
-    const rateValue = form.commission_rate.trim().replace(",", ".");
+    const rateValue = form.commission_rate
+      .trim()
+      .replace(",", ".");
+
     const rate = Number(rateValue);
 
     if (min === null || (form.max_sales.trim() && max === null)) {
@@ -272,11 +282,6 @@ export function ComissoesPage() {
       return;
     }
 
-    if (max !== null && max < min) {
-      setError("O valor máximo não pode ser menor que o mínimo.");
-      return;
-    }
-
     const candidate: CommissionRange = {
       id: editingId ?? -1,
       min_sales: min,
@@ -291,7 +296,10 @@ export function ComissoesPage() {
             range.id === editingId ? candidate : range,
           );
 
-    const validationError = validateRanges(nextRanges);
+    // A validação é centralizada no domínio, usando centavos
+    // e exigindo faixas contínuas com a última ilimitada.
+    const validationError =
+      validateCommissionRanges(nextRanges);
 
     if (validationError) {
       setError(validationError);
@@ -312,7 +320,9 @@ export function ComissoesPage() {
     try {
       const result =
         editingId === null
-          ? await supabase.from("commission_ranges").insert(payload)
+          ? await supabase
+              .from("commission_ranges")
+              .insert(payload)
           : await supabase
               .from("commission_ranges")
               .update(payload)
@@ -320,14 +330,24 @@ export function ComissoesPage() {
               .eq("user_id", userId);
 
       if (result.error) {
-        setError(`Não foi possível salvar: ${result.error.message}`);
-      } else {
-        resetForm();
-        setMessage("Faixa salva com sucesso.");
-        await loadRanges();
+        setError(
+          `Não foi possível salvar: ${result.error.message}`,
+        );
+        return;
       }
-    } catch {
-      setError("Ocorreu um erro inesperado ao salvar a faixa.");
+
+      resetForm();
+      setMessage("Faixa salva com sucesso.");
+
+      await loadRanges();
+    } catch (err: unknown) {
+      console.error("Erro ao salvar faixa:", err);
+
+      setError(
+        err instanceof Error
+          ? `Não foi possível salvar a faixa: ${err.message}`
+          : "Ocorreu um erro inesperado ao salvar a faixa.",
+      );
     } finally {
       setSaving(false);
     }
@@ -356,12 +376,15 @@ export function ComissoesPage() {
         .eq("user_id", userId);
 
       if (deleteError) {
-        setError(`Não foi possível excluir: ${deleteError.message}`);
+        setError(
+          `Não foi possível excluir: ${deleteError.message}`,
+        );
         return;
       }
 
       if (editingId === id) {
-        resetForm();
+        setForm(emptyForm);
+        setEditingId(null);
       }
 
       setMessage(
@@ -369,8 +392,14 @@ export function ComissoesPage() {
       );
 
       await loadRanges();
-    } catch {
-      setError("Ocorreu um erro inesperado ao excluir a faixa.");
+    } catch (err: unknown) {
+      console.error("Erro ao excluir faixa:", err);
+
+      setError(
+        err instanceof Error
+          ? `Não foi possível excluir: ${err.message}`
+          : "Ocorreu um erro inesperado ao excluir a faixa.",
+      );
     }
   }
 
@@ -378,12 +407,20 @@ export function ComissoesPage() {
     (a, b) => a.min_sales - b.min_sales,
   );
 
-  const activeRange = getCommissionRange(monthlySales, ranges);
-
-  const estimatedCommission = calculateEstimatedCommission(
+  // O cálculo seguro impede que regras inválidas vindas do banco
+  // provoquem exceções durante a renderização.
+  const commissionEstimate = getCommissionEstimate(
     monthlySales,
-    activeRange,
+    ranges,
   );
+
+  const activeRange = commissionEstimate.ok
+    ? commissionEstimate.range
+    : null;
+
+  const estimatedCommission = commissionEstimate.ok
+    ? commissionEstimate.amount
+    : null;
 
   return (
     <section className="commission-page">
@@ -433,7 +470,9 @@ export function ComissoesPage() {
             <div>
               <span>Vendas do mês</span>
               <strong>
-                {loading ? "Carregando..." : formatMoney(monthlySales)}
+                {loading
+                  ? "Carregando..."
+                  : formatMoney(monthlySales)}
               </strong>
             </div>
           </article>
@@ -444,9 +483,13 @@ export function ComissoesPage() {
               <strong>
                 {loading
                   ? "Carregando..."
-                  : activeRange
-                    ? `${activeRange.commission_rate}%`
-                    : "Sem faixa correspondente"}
+                  : !commissionEstimate.ok
+                    ? "Configuração inválida"
+                    : activeRange
+                      ? formatCommissionRate(
+                          activeRange.commission_rate,
+                        )
+                      : "Sem faixa correspondente"}
               </strong>
             </div>
           </article>
@@ -457,34 +500,57 @@ export function ComissoesPage() {
               <strong>
                 {loading
                   ? "Carregando..."
-                  : estimatedCommission !== null
-                    ? formatMoney(estimatedCommission)
-                    : "—"}
+                  : !commissionEstimate.ok
+                    ? "Indisponível"
+                    : estimatedCommission !== null
+                      ? formatMoney(estimatedCommission)
+                      : "—"}
               </strong>
             </div>
           </article>
         </div>
 
-        {!loading && !activeRange && (
-          <p>
-            O faturamento atual não está dentro de nenhuma faixa cadastrada.
-            Revise os limites para que todas as vendas sejam contempladas.
-          </p>
+        {!loading && !commissionEstimate.ok && (
+          <div
+            className="commission-feedback commission-error"
+            role="alert"
+          >
+            <strong>Não foi possível calcular a comissão.</strong>
+            <p>
+              {commissionEstimate.error} Revise as faixas cadastradas
+              antes de utilizar a estimativa.
+            </p>
+          </div>
         )}
 
-        {!loading && activeRange && (
-          <p>
-            O percentual de {activeRange.commission_rate}% foi aplicado
-            sobre o faturamento total do mês.
-          </p>
-        )}
+        {!loading &&
+          commissionEstimate.ok &&
+          !activeRange && (
+            <p>
+              O faturamento atual não está dentro de nenhuma faixa
+              cadastrada. Revise os limites para que todas as vendas
+              sejam contempladas.
+            </p>
+          )}
+
+        {!loading &&
+          commissionEstimate.ok &&
+          activeRange && (
+            <p>
+              O percentual de{" "}
+              {formatCommissionRate(activeRange.commission_rate)}{" "}
+              foi aplicado sobre o faturamento total do mês.
+            </p>
+          )}
       </section>
 
       <section className="commission-card">
         <div className="commission-card-heading">
           <div>
             <h2>
-              {editingId === null ? "Adicionar faixa" : "Editar faixa"}
+              {editingId === null
+                ? "Adicionar faixa"
+                : "Editar faixa"}
             </h2>
 
             <p>
@@ -502,10 +568,12 @@ export function ComissoesPage() {
               type="text"
               value={form.min_sales}
               onChange={(event) =>
-                setForm({
-                  ...form,
-                  min_sales: formatCurrencyInput(event.target.value),
-                })
+                setForm((current) => ({
+                  ...current,
+                  min_sales: formatCurrencyInput(
+                    event.target.value,
+                  ),
+                }))
               }
               placeholder="R$ 0,00"
               inputMode="numeric"
@@ -520,10 +588,12 @@ export function ComissoesPage() {
               type="text"
               value={form.max_sales}
               onChange={(event) =>
-                setForm({
-                  ...form,
-                  max_sales: formatCurrencyInput(event.target.value),
-                })
+                setForm((current) => ({
+                  ...current,
+                  max_sales: formatCurrencyInput(
+                    event.target.value,
+                  ),
+                }))
               }
               placeholder="Em diante"
               inputMode="numeric"
@@ -540,10 +610,10 @@ export function ComissoesPage() {
               step="0.01"
               value={form.commission_rate}
               onChange={(event) =>
-                setForm({
-                  ...form,
+                setForm((current) => ({
+                  ...current,
                   commission_rate: event.target.value,
-                })
+                }))
               }
               placeholder="Ex.: 3"
               required
@@ -560,7 +630,11 @@ export function ComissoesPage() {
             </button>
 
             {editingId !== null && (
-              <button type="button" onClick={resetForm}>
+              <button
+                type="button"
+                onClick={resetForm}
+                disabled={saving}
+              >
                 Cancelar edição
               </button>
             )}
@@ -590,15 +664,15 @@ export function ComissoesPage() {
                   <span>Faixa {index + 1}</span>
 
                   <strong>
-                    {formatMoney(range.min_sales)} até{" "}
+                    {formatRangeBound(range.min_sales)} até{" "}
                     {range.max_sales === null
                       ? "em diante"
-                      : formatMoney(range.max_sales)}
+                      : formatRangeBound(range.max_sales)}
                   </strong>
 
                   <small>
-                    {range.commission_rate}% de comissão sobre o total
-                    vendido
+                    {formatCommissionRate(range.commission_rate)}{" "}
+                    de comissão sobre o total vendido
                   </small>
                 </div>
 

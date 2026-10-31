@@ -4,8 +4,7 @@ import { Link } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/auth";
 import {
-  getCommissionRange,
-  calculateEstimatedCommission,
+  getCommissionEstimate,
   type CommissionRange,
 } from "../lib/commission";
 import { todayInBrazil } from "../domain/dates";
@@ -31,25 +30,53 @@ type DailySales = {
 };
 
 function formatCurrency(value: number, currency = "BRL"): string {
-  return new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency,
-  }).format(Number.isFinite(value) ? value : 0);
+  const safeValue = Number.isFinite(value) ? value : 0;
+
+  try {
+    return new Intl.NumberFormat("pt-BR", {
+      style: "currency",
+      currency,
+    }).format(safeValue);
+  } catch {
+    return new Intl.NumberFormat("pt-BR", {
+      style: "currency",
+      currency: "BRL",
+    }).format(safeValue);
+  }
 }
 
 function calculateSalesTotal(entries: SalesEntry[]): number {
-  return entries.reduce(
-    (total, entry) => total + (Number(entry.amount) || 0),
-    0,
-  );
+  return entries.reduce((total, entry) => {
+    const amount = Number(entry.amount);
+
+    return total + (Number.isFinite(amount) ? amount : 0);
+  }, 0);
 }
 
+/**
+ * Formata uma data de calendário sem depender do fuso do dispositivo.
+ */
 function formatDate(dateString: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateString);
+
+  if (!match) return dateString;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  if (date.toISOString().slice(0, 10) !== dateString) {
+    return dateString;
+  }
+
   return new Intl.DateTimeFormat("pt-BR", {
     day: "2-digit",
     month: "long",
     year: "numeric",
-  }).format(new Date(`${dateString}T12:00:00`));
+    timeZone: "UTC",
+  }).format(date);
 }
 
 function getNextCommissionRange(
@@ -68,6 +95,7 @@ function calculateDailySales(entries: SalesEntry[]): DailySales[] {
 
   for (const entry of entries) {
     const dayEntries = byDate.get(entry.sale_date) ?? [];
+
     dayEntries.push(entry);
     byDate.set(entry.sale_date, dayEntries);
   }
@@ -86,13 +114,21 @@ export function DashboardPage() {
 
   const [entries, setEntries] = useState<SalesEntry[]>([]);
   const [settings, setSettings] = useState<UserSettings | null>(null);
-  const [commissionRanges, setCommissionRanges] = useState<CommissionRange[]>([]);
+  const [commissionRanges, setCommissionRanges] = useState<
+    CommissionRange[]
+  >([]);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
   const [todayString, setTodayString] = useState(() =>
     todayInBrazil(),
   );
 
+  /**
+   * Carrega vendas, configurações e faixas de comissão.
+   * Todas as consultas pertencem exclusivamente ao usuário autenticado.
+   */
   const loadSales = useCallback(async () => {
     if (!supabase || !userId) {
       setEntries([]);
@@ -119,7 +155,9 @@ export function DashboardPage() {
       ] = await Promise.all([
         supabase
           .from("sales_entries")
-          .select("id, sale_date, entry_type, amount, quantity, created_at")
+          .select(
+            "id, sale_date, entry_type, amount, quantity, created_at",
+          )
           .eq("user_id", userId)
           .gte("sale_date", startDate)
           .lte("sale_date", endDate)
@@ -142,32 +180,51 @@ export function DashboardPage() {
       if (settingsError) throw settingsError;
       if (rangesError) throw rangesError;
 
-      setEntries(
-        (salesData ?? []).map((entry) => ({
+      const normalizedEntries: SalesEntry[] = (
+        salesData ?? []
+      ).map((entry) => {
+        const amount = Number(entry.amount);
+        const quantity = Number(entry.quantity);
+
+        return {
           ...entry,
-          amount: Number(entry.amount) || 0,
-          quantity: Number(entry.quantity) || 0,
-        })) as SalesEntry[],
-      );
+          amount: Number.isFinite(amount) ? amount : 0,
+          quantity: Number.isFinite(quantity) ? quantity : 0,
+        } as SalesEntry;
+      });
 
-      setSettings(
-        settingsData
-          ? {
-              monthly_goal: Number(settingsData.monthly_goal ?? 0),
-              currency_code: settingsData.currency_code ?? "BRL",
-            }
-          : null,
-      );
+      const normalizedSettings: UserSettings | null = settingsData
+        ? {
+            monthly_goal: Number.isFinite(
+              Number(settingsData.monthly_goal),
+            )
+              ? Math.max(0, Number(settingsData.monthly_goal))
+              : 0,
 
-      setCommissionRanges(
-        (rangesData ?? []).map((range) => ({
-          id: Number(range.id),
-          min_sales: Number(range.min_sales),
-          max_sales:
-            range.max_sales === null ? null : Number(range.max_sales),
-          commission_rate: Number(range.commission_rate),
-        })),
-      );
+            currency_code: ["BRL", "USD", "EUR"].includes(
+              settingsData.currency_code,
+            )
+              ? settingsData.currency_code
+              : "BRL",
+          }
+        : null;
+
+      const normalizedRanges: CommissionRange[] = (
+        rangesData ?? []
+      ).map((range) => ({
+        id: Number(range.id),
+        min_sales: Number(range.min_sales),
+        max_sales:
+          range.max_sales === null
+            ? null
+            : Number(range.max_sales),
+        commission_rate: Number(range.commission_rate),
+      }));
+
+      setEntries(normalizedEntries);
+      setSettings(normalizedSettings);
+      setCommissionRanges(normalizedRanges);
+
     } catch (err: unknown) {
       console.error("Erro ao carregar dashboard:", err);
 
@@ -183,7 +240,10 @@ export function DashboardPage() {
     void loadSales();
   }, [loadSales]);
 
-  // Atualiza o painel quando o dia muda no fuso horário brasileiro.
+  /**
+   * Atualiza o painel quando o dia muda em America/Sao_Paulo.
+   * A verificação ocorre a cada minuto, sem depender do relógio local.
+   */
   useEffect(() => {
     let lastBrazilDate = todayInBrazil();
 
@@ -194,22 +254,32 @@ export function DashboardPage() {
 
       lastBrazilDate = currentBrazilDate;
       setTodayString(currentBrazilDate);
+
       void loadSales();
     }, 60_000);
 
-    return () => window.clearInterval(intervalId);
+    return () => {
+      window.clearInterval(intervalId);
+    };
   }, [loadSales]);
 
-  // Atualiza os dados quando o usuário retorna à aba do aplicativo.
+  /**
+   * Atualiza os dados quando o usuário retorna à aba do aplicativo.
+   */
   useEffect(() => {
     function handleVisibilityChange() {
       if (document.visibilityState !== "visible") return;
 
-      setTodayString(todayInBrazil());
+      const currentBrazilDate = todayInBrazil();
+
+      setTodayString(currentBrazilDate);
       void loadSales();
     }
 
-    document.addEventListener("visibilitychange", handleVisibilityChange);
+    document.addEventListener(
+      "visibilitychange",
+      handleVisibilityChange,
+    );
 
     return () => {
       document.removeEventListener(
@@ -231,24 +301,30 @@ export function DashboardPage() {
   const todayEntryCount = todayEntries.length;
   const monthEntryCount = entries.length;
 
-  // A mesma regra de identificação e cálculo utilizada na página Comissões.
-  const activeCommissionRange = getCommissionRange(
+  /**
+   * Utiliza a mesma camada segura de cálculo da página Comissões.
+   * Configurações inválidas não podem interromper a renderização.
+   */
+  const commissionEstimate = getCommissionEstimate(
     monthTotal,
     commissionRanges,
   );
 
-  const nextCommissionRange = getNextCommissionRange(
-    monthTotal,
-    commissionRanges,
-  );
+  const activeCommissionRange = commissionEstimate.ok
+    ? commissionEstimate.range
+    : null;
 
-  const commissionRate =
-    activeCommissionRange?.commission_rate ?? null;
+  const nextCommissionRange = commissionEstimate.ok
+    ? getNextCommissionRange(monthTotal, commissionRanges)
+    : null;
 
-  const estimatedCommission = calculateEstimatedCommission(
-    monthTotal,
-    activeCommissionRange,
-  );
+  const commissionRate = commissionEstimate.ok
+    ? commissionEstimate.range?.commission_rate ?? null
+    : null;
+
+  const estimatedCommission = commissionEstimate.ok
+    ? commissionEstimate.amount
+    : null;
 
   const amountToNextRange = nextCommissionRange
     ? Math.max(0, nextCommissionRange.min_sales - monthTotal)
@@ -260,14 +336,19 @@ export function DashboardPage() {
     monthlyGoal > 0 ? (monthTotal / monthlyGoal) * 100 : null;
 
   const amountToGoal =
-    monthlyGoal > 0 ? Math.max(0, monthlyGoal - monthTotal) : null;
+    monthlyGoal > 0
+      ? Math.max(0, monthlyGoal - monthTotal)
+      : null;
 
   const today = new Intl.DateTimeFormat("pt-BR", {
     weekday: "long",
     day: "numeric",
     month: "long",
     year: "numeric",
-  }).format(new Date(`${todayString}T12:00:00`));
+    timeZone: "UTC",
+  }).format(
+    new Date(`${todayString}T12:00:00Z`),
+  );
 
   const dailySales = useMemo(
     () => calculateDailySales(entries),
@@ -296,19 +377,25 @@ export function DashboardPage() {
     },
     {
       label: "Comissão estimada",
-      value:
-        estimatedCommission !== null
+      value: !commissionEstimate.ok
+        ? "Indisponível"
+        : estimatedCommission !== null
           ? formatCurrency(estimatedCommission, currency)
           : "—",
-      description:
-        commissionRate !== null
+
+      description: !commissionEstimate.ok
+        ? "Revise as faixas cadastradas"
+        : commissionRate !== null
           ? `${commissionRate}% sobre o total vendido`
           : commissionRanges.length === 0
             ? "Configure suas faixas de comissão"
             : "Nenhuma faixa corresponde às vendas",
+
       icon: "%",
-      status:
-        commissionRate !== null
+
+      status: !commissionEstimate.ok
+        ? "Revisar"
+        : commissionRate !== null
           ? "Calculada"
           : "Pendente",
     },
@@ -318,13 +405,16 @@ export function DashboardPage() {
         monthlyGoal > 0
           ? formatCurrency(monthlyGoal, currency)
           : "—",
+
       description:
         amountToGoal !== null
           ? amountToGoal === 0
             ? "Objetivo alcançado"
             : `Faltam ${formatCurrency(amountToGoal, currency)}`
           : "Defina sua meta mensal",
+
       icon: "◎",
+
       status:
         amountToGoal === 0 && monthlyGoal > 0
           ? "Concluída"
@@ -360,12 +450,18 @@ export function DashboardPage() {
             Tenha uma visão clara das suas vendas, metas e comissões.
           </p>
 
-          <Link to="/vendas/nova" className="dashboard-primary-link">
+          <Link
+            to="/vendas/nova"
+            className="dashboard-primary-link"
+          >
             <span aria-hidden="true">＋</span> Registrar nova venda
           </Link>
         </div>
 
-        <div className="dashboard-welcome-mark" aria-hidden="true">
+        <div
+          className="dashboard-welcome-mark"
+          aria-hidden="true"
+        >
           <span>Ê</span>
         </div>
       </section>
@@ -395,9 +491,15 @@ export function DashboardPage() {
           <span className="dashboard-period">Mês atual</span>
         </div>
 
-        <div className="dashboard-indicators" aria-busy={loading}>
+        <div
+          className="dashboard-indicators"
+          aria-busy={loading}
+        >
           {indicators.map((item) => (
-            <article className="dashboard-indicator" key={item.label}>
+            <article
+              className="dashboard-indicator"
+              key={item.label}
+            >
               <div className="dashboard-indicator-top">
                 <span className="dashboard-indicator-icon">
                   {item.icon}
@@ -408,14 +510,18 @@ export function DashboardPage() {
                 </span>
               </div>
 
-              <p className="dashboard-indicator-label">{item.label}</p>
+              <p className="dashboard-indicator-label">
+                {item.label}
+              </p>
 
               <strong className="dashboard-indicator-value">
                 {loading ? "…" : item.value}
               </strong>
 
               <p className="dashboard-indicator-description">
-                {loading ? "Buscando seus dados..." : item.description}
+                {loading
+                  ? "Buscando seus dados..."
+                  : item.description}
               </p>
             </article>
           ))}
@@ -449,7 +555,10 @@ export function DashboardPage() {
                 Registre sua primeira venda para acompanhar sua evolução.
               </p>
 
-              <Link to="/vendas/nova" className="dashboard-text-link">
+              <Link
+                to="/vendas/nova"
+                className="dashboard-text-link"
+              >
                 Registrar primeira venda →
               </Link>
             </div>
@@ -497,10 +606,15 @@ export function DashboardPage() {
               <div className="dashboard-chart-footer">
                 <div>
                   <span>Total vendido no mês</span>
-                  <strong>{formatCurrency(monthTotal, currency)}</strong>
+                  <strong>
+                    {formatCurrency(monthTotal, currency)}
+                  </strong>
                 </div>
 
-                <Link to="/historico" className="dashboard-text-link">
+                <Link
+                  to="/historico"
+                  className="dashboard-text-link"
+                >
                   Ver lançamentos →
                 </Link>
               </div>
@@ -517,7 +631,10 @@ export function DashboardPage() {
             </div>
           </div>
 
-          <Link to="/vendas/nova" className="dashboard-action">
+          <Link
+            to="/vendas/nova"
+            className="dashboard-action"
+          >
             <span className="dashboard-action-icon">＋</span>
 
             <span>
@@ -528,7 +645,10 @@ export function DashboardPage() {
             <span className="dashboard-action-arrow">→</span>
           </Link>
 
-          <Link to="/historico" className="dashboard-action">
+          <Link
+            to="/historico"
+            className="dashboard-action"
+          >
             <span className="dashboard-action-icon">↗</span>
 
             <span>
@@ -539,7 +659,10 @@ export function DashboardPage() {
             <span className="dashboard-action-arrow">→</span>
           </Link>
 
-          <Link to="/comissoes" className="dashboard-action">
+          <Link
+            to="/comissoes"
+            className="dashboard-action"
+          >
             <span className="dashboard-action-icon">%</span>
 
             <span>
@@ -550,7 +673,10 @@ export function DashboardPage() {
             <span className="dashboard-action-arrow">→</span>
           </Link>
 
-          <Link to="/configuracoes" className="dashboard-action">
+          <Link
+            to="/configuracoes"
+            className="dashboard-action"
+          >
             <span className="dashboard-action-icon">⚙</span>
 
             <span>
@@ -568,10 +694,15 @@ export function DashboardPage() {
           <div>
             <p className="dashboard-eyebrow">SEUS OBJETIVOS</p>
             <h2>Metas e comissões</h2>
-            <p>Acompanhe quanto já conquistou e o que falta alcançar.</p>
+            <p>
+              Acompanhe quanto já conquistou e o que falta alcançar.
+            </p>
           </div>
 
-          <Link to="/comissoes" className="dashboard-text-link">
+          <Link
+            to="/comissoes"
+            className="dashboard-text-link"
+          >
             Gerenciar comissões →
           </Link>
         </div>
@@ -586,12 +717,13 @@ export function DashboardPage() {
             <article className="dashboard-goal-card">
               <div className="dashboard-goal-card-heading">
                 <span className="dashboard-goal-icon">%</span>
+
                 <span className="dashboard-goal-caption">
                   FAIXA ATUAL
                 </span>
               </div>
 
-              {activeCommissionRange ? (
+              {commissionEstimate.ok && activeCommissionRange ? (
                 <>
                   <strong className="dashboard-goal-value">
                     {activeCommissionRange.commission_rate}%
@@ -618,21 +750,27 @@ export function DashboardPage() {
               ) : (
                 <>
                   <strong className="dashboard-goal-value dashboard-goal-value-text">
-                    {commissionRanges.length === 0
-                      ? "Não configurada"
-                      : "Não identificada"}
+                    {!commissionEstimate.ok
+                      ? "Configuração inválida"
+                      : commissionRanges.length === 0
+                        ? "Não configurada"
+                        : "Não identificada"}
                   </strong>
 
                   <p>
-                    {commissionRanges.length === 0
-                      ? "Cadastre suas faixas de comissão."
-                      : "Verifique os limites cadastrados."}
+                    {!commissionEstimate.ok
+                      ? "Não foi possível validar suas faixas."
+                      : commissionRanges.length === 0
+                        ? "Cadastre suas faixas de comissão."
+                        : "Verifique os limites cadastrados."}
                   </p>
 
                   <small>
-                    {commissionRanges.length === 0
-                      ? "Configure seus percentuais para acompanhar a estimativa."
-                      : "O faturamento atual não corresponde a uma faixa."}
+                    {!commissionEstimate.ok
+                      ? commissionEstimate.error
+                      : commissionRanges.length === 0
+                        ? "Configure seus percentuais para acompanhar a estimativa."
+                        : "O faturamento atual não corresponde a uma faixa."}
                   </small>
                 </>
               )}
@@ -641,12 +779,26 @@ export function DashboardPage() {
             <article className="dashboard-goal-card">
               <div className="dashboard-goal-card-heading">
                 <span className="dashboard-goal-icon">↗</span>
+
                 <span className="dashboard-goal-caption">
                   PRÓXIMA FAIXA
                 </span>
               </div>
 
-              {nextCommissionRange && amountToNextRange !== null ? (
+              {!commissionEstimate.ok ? (
+                <>
+                  <strong className="dashboard-goal-value dashboard-goal-value-text">
+                    Configuração inválida
+                  </strong>
+
+                  <p>
+                    Não foi possível identificar a próxima faixa.
+                  </p>
+
+                  <small>{commissionEstimate.error}</small>
+                </>
+              ) : nextCommissionRange &&
+                amountToNextRange !== null ? (
                 <>
                   <strong className="dashboard-goal-value">
                     {formatCurrency(
@@ -656,12 +808,13 @@ export function DashboardPage() {
                   </strong>
 
                   <p>
-                    Falta {formatCurrency(amountToNextRange, currency)} em
-                    vendas.
+                    Falta{" "}
+                    {formatCurrency(amountToNextRange, currency)} em vendas.
                   </p>
 
                   <small>
-                    Próximo percentual: {nextCommissionRange.commission_rate}%
+                    Próximo percentual:{" "}
+                    {nextCommissionRange.commission_rate}%
                   </small>
                 </>
               ) : (
@@ -690,6 +843,7 @@ export function DashboardPage() {
             <article className="dashboard-goal-card dashboard-personal-goal">
               <div className="dashboard-goal-card-heading">
                 <span className="dashboard-goal-icon">◎</span>
+
                 <span className="dashboard-goal-caption">
                   META PESSOAL
                 </span>
@@ -767,15 +921,20 @@ export function DashboardPage() {
             <span>Comissão estimada neste mês</span>
 
             <strong>
-              {estimatedCommission !== null
-                ? formatCurrency(estimatedCommission, currency)
-                : commissionRanges.length === 0
-                  ? "Configure suas faixas"
-                  : "Nenhuma faixa correspondente"}
+              {!commissionEstimate.ok
+                ? "Revise suas faixas cadastradas"
+                : estimatedCommission !== null
+                  ? formatCurrency(estimatedCommission, currency)
+                  : commissionRanges.length === 0
+                    ? "Configure suas faixas"
+                    : "Nenhuma faixa correspondente"}
             </strong>
           </div>
 
-          <Link to="/comissoes" className="dashboard-secondary-link">
+          <Link
+            to="/comissoes"
+            className="dashboard-secondary-link"
+          >
             Abrir página de comissões →
           </Link>
         </div>

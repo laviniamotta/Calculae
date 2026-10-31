@@ -1,5 +1,11 @@
 
-import { useEffect, useState } from "react";
+import {
+  Component,
+  useEffect,
+  useState,
+  type ErrorInfo,
+  type ReactNode,
+} from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 
 import { useAuth } from "../lib/auth";
@@ -7,9 +13,64 @@ import { Logo } from "./Logo";
 import { ThemeToggle } from "./ThemeToggle";
 import { UpdatePrompt } from "./UpdatePrompt";
 
+type PageErrorBoundaryProps = {
+  children: ReactNode;
+};
+
+type PageErrorBoundaryState = {
+  hasError: boolean;
+};
+
+/**
+ * Protege o conteúdo da página contra erros inesperados de renderização.
+ */
+class PageErrorBoundary extends Component<
+  PageErrorBoundaryProps,
+  PageErrorBoundaryState
+> {
+  override state: PageErrorBoundaryState = {
+    hasError: false,
+  };
+
+  static getDerivedStateFromError(): PageErrorBoundaryState {
+    return {
+      hasError: true,
+    };
+  }
+
+  override componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("Erro inesperado ao renderizar a página:", error, info);
+  }
+
+  override render() {
+    if (this.state.hasError) {
+      return (
+        <section className="card" role="alert">
+          <h1>Não foi possível exibir esta página</h1>
+
+          <p>
+            Ocorreu um erro inesperado ao carregar o conteúdo.
+            Tente acessar novamente.
+          </p>
+
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+          >
+            Recarregar página
+          </button>
+        </section>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 export function AppShell() {
   const { session, isAdmin, signOut } = useAuth();
   const location = useLocation();
+
   const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -107,7 +168,9 @@ export function AppShell() {
       </header>
 
       <main id="conteudo" className="main">
-        <Outlet />
+        <PageErrorBoundary key={location.pathname}>
+          <Outlet />
+        </PageErrorBoundary>
       </main>
 
       <UpdatePrompt />

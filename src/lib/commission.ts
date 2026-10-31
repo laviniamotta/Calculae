@@ -4,7 +4,12 @@ import {
   CommissionError,
   type PlanRule,
 } from "../domain/commission";
-import { isValidCents, type Cents } from "../domain/money";
+import {
+  formatBRL,
+  isValidCents,
+  type Cents,
+} from "../domain/money";
+import { validateRanges as validateDomainRanges } from "../domain/ranges";
 
 export type CommissionRange = {
   id: number;
@@ -12,6 +17,17 @@ export type CommissionRange = {
   max_sales: number | null;
   commission_rate: number;
 };
+
+export type CommissionEstimate =
+  | {
+      ok: true;
+      range: CommissionRange | null;
+      amount: number | null;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
 
 function toCents(value: number, field: string): Cents {
   if (!Number.isFinite(value) || value < 0) {
@@ -22,6 +38,12 @@ function toCents(value: number, field: string): Cents {
 
   if (!isValidCents(cents)) {
     throw new RangeError(`${field}: valor fora do limite permitido.`);
+  }
+
+  if (Math.abs(value - cents / 100) > 1e-7) {
+    throw new RangeError(
+      `${field}: informe um valor com no máximo duas casas decimais.`,
+    );
   }
 
   return cents;
@@ -42,6 +64,46 @@ function toBasisPoints(rate: number): number {
   }
 
   return basisPoints;
+}
+
+/**
+ * Converte as faixas da tela/banco para a representação do domínio
+ * e reutiliza a validação oficial de continuidade.
+ */
+export function validateCommissionRanges(
+  ranges: CommissionRange[],
+): string | null {
+  if (ranges.length === 0) return null;
+
+  const tiers: { min: Cents; max: Cents | null }[] = [];
+
+  for (const [index, range] of ranges.entries()) {
+    try {
+      const min = toCents(range.min_sales, "Limite mínimo");
+      const max =
+        range.max_sales === null
+          ? null
+          : toCents(range.max_sales, "Limite máximo");
+
+      toBasisPoints(range.commission_rate);
+
+      tiers.push({ min, max });
+    } catch (error) {
+      const reason =
+        error instanceof Error
+          ? error.message
+          : "valor inválido.";
+
+      return `Faixa ${index + 1}: ${reason}`;
+    }
+  }
+
+  const issues = validateDomainRanges(tiers, {
+    contiguous: true,
+    format: formatBRL,
+  });
+
+  return issues[0]?.message ?? null;
 }
 
 function buildTierRule(ranges: CommissionRange[]) {
@@ -69,7 +131,7 @@ function buildTierRule(ranges: CommissionRange[]) {
 }
 
 /**
- * Seleciona a faixa usando a validação e a lógica do domínio.
+ * Seleciona a faixa usando as regras do domínio.
  * A regra atual do banco aplica a taxa da faixa ao faturamento total.
  */
 export function getCommissionRange(
@@ -78,7 +140,11 @@ export function getCommissionRange(
 ): CommissionRange | null {
   if (ranges.length === 0) return null;
 
-  const revenueCents = toCents(monthTotal, "Faturamento mensal");
+  const revenueCents = toCents(
+    monthTotal,
+    "Faturamento mensal",
+  );
+
   const { ordered, rule } = buildTierRule(ranges);
 
   try {
@@ -103,8 +169,8 @@ export function getCommissionRange(
 }
 
 /**
- * Calcula a comissão com a regra de dinheiro em centavos
- * e arredondamento definida em src/domain/commission.ts.
+ * Calcula a comissão com dinheiro em centavos e
+ * arredondamento definido no domínio.
  */
 export function calculateEstimatedCommission(
   monthTotal: number,
@@ -118,10 +184,45 @@ export function calculateEstimatedCommission(
       rateBps: toBasisPoints(range.commission_rate),
     },
     {
-      revenueCents: toCents(monthTotal, "Faturamento mensal"),
+      revenueCents: toCents(
+        monthTotal,
+        "Faturamento mensal",
+      ),
       salesCount: null,
     },
   );
 
   return result.commissionCents / 100;
+}
+
+/**
+ * Ponto seguro para as telas.
+ * Uma configuração inválida retorna um erro controlado,
+ * em vez de lançar uma exceção durante a renderização.
+ */
+export function getCommissionEstimate(
+  monthTotal: number,
+  ranges: CommissionRange[],
+): CommissionEstimate {
+  try {
+    const range = getCommissionRange(monthTotal, ranges);
+    const amount = calculateEstimatedCommission(
+      monthTotal,
+      range,
+    );
+
+    return {
+      ok: true,
+      range,
+      amount,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Não foi possível calcular a comissão.",
+    };
+  }
 }
