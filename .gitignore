@@ -19,10 +19,18 @@ dist/
 *.log
 coverage/
 
-# SQL planejado, incompatível com o banco atual
-/supabase/migrations/
-/supabase/tests/
+# Migrações antigas ainda não reconciliadas com o banco atual
+/supabase/migrations/*
+!/supabase/migrations/
+!/supabase/migrations/20261031000001_harden_current_schema.sql
+
 /supabase/bootstrap_admin.sql
+
+# Mantém os testes antigos ignorados e libera apenas o novo teste
+/supabase/tests/
+!/supabase/tests/
+/supabase/tests/*
+!/supabase/tests/rls_isolation.current.sql
 
 # Documentação antiga, pendente de atualização
 /docs/
