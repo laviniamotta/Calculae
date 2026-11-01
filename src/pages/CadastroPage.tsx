@@ -36,9 +36,25 @@ export function CadastroPage() {
     try {
       await signUp(name.trim(), email.trim(), password);
       setSuccess(true);
-    } catch {
+        } catch (caughtError: unknown) {
+      const authError = caughtError as {
+        code?: string;
+        message?: string;
+      };
+
+      const errorCode = authError.code?.toLowerCase();
+      const errorMessage = authError.message?.toLowerCase() ?? "";
+
+      const signupsDisabled =
+        errorCode === "signup_disabled" ||
+        errorMessage.includes("signups not allowed") ||
+        errorMessage.includes("signups are disabled") ||
+        errorMessage.includes("signup is disabled");
+
       setError(
-        "Não foi possível criar sua conta. Confira os dados ou tente outro e-mail.",
+        signupsDisabled
+          ? "Cadastros temporariamente encerrados. O CalculaÊ! não está aceitando novas contas no momento. Se você já possui uma conta, poderá acessar normalmente."
+          : "Não foi possível criar sua conta. Confira os dados ou tente outro e-mail.",
       );
     } finally {
       setLoading(false);
